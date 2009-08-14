@@ -10,16 +10,37 @@
  *  LDFLAGS = -lgomp
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <limits.h>
 #include <unistd.h>
+#include <stdarg.h>
 #include <sys/time.h>
+#define HT_BINS (16 * 1024 * 1024)
+#include "ht.h"
 
 #undef BUFSZ
 #define BUFSZ (512 * 1024)
+
+static struct timeval StartTV;
+static double Start;
+#if 0
+static void mark(const char *fmt, ...)
+{
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  double total = (now.tv_sec * 1000000. + now.tv_usec) / 1000000.;
+  printf("%.3f ", total - Start);
+  va_list ap;
+  va_start(ap, fmt);
+  vprintf(fmt, ap);
+  va_end(ap);
+}
+#endif
+#define mark(fmt,...)
 
 struct str {
   char  *str;
@@ -55,29 +76,54 @@ static void str_grow(struct str *s, size_t len)
 }
 
 /* uniquely hash a DNA sequence */
-inline unsigned dna_hash(const char *dna, unsigned len)
+inline unsigned long dna_hash(const char *dna, unsigned len)
 {
-  unsigned h = 0;
+  unsigned long h = 0;
   while (len--)
     h = (h << 2) + (*dna > 'A') + (*dna > 'C') + (*dna > 'G'), dna++;
   return h;
 }
 
-struct freq {
-  unsigned    cnt,
-              len;
-  const char *str;
-};
+#define index(key, len) (dna_hash(key, len) & (HT_BINS - 1))
+
+static unsigned long do_freq_build(struct ht *t,
+                                   const struct str *seq, unsigned len) {
+  const unsigned long total = seq->len - len + 1;
+  const char *key = seq->str;
+  for (unsigned long i = 0; i < total; i++)
+    htincr(t, key, len, index(key, len)), key++;
+  return total;
+}
+
+static ptrdiff_t do_freq_copy(const struct ht *t, struct htentry *e)
+{
+  struct htentry *c = e;
+  struct hteach each;
+  if (hteach_init(&each, t))
+    do
+      *c++ = *each.curr;
+    while (hteach_next(&each, t));
+  return c - e;
+}
 
 static int freqcmp(const void *va, const void *vb)
 {
-  const struct freq *a = va, *b = vb;
+  const struct htentry *a = va, *b = vb;
   if (b->cnt != a->cnt)
     return (int)(b->cnt - a->cnt);
-  if (!a->str || !b->str)
-    return 0;
-  return strncmp(b->str, a->str, b->len);
+  return strcmp(b->key, a->key);
 }
+
+static void do_freq_print(const struct htentry *e, unsigned cnt,
+                          unsigned long total, char *buf)
+{
+  while (cnt--)
+    buf += sprintf(buf, "%.*s %5.3f\n",
+      (unsigned)e->len, e->key, (double)e->cnt / total * 100.), e++;
+  strcat(buf, "\n");
+}
+
+#define dna_combo(nth) (1ULL << (2 * (nth)))
 
 /*
  * count all the 1-nucleotide and 2-nucleotide sequences, and write the
@@ -86,29 +132,17 @@ static int freqcmp(const void *va, const void *vb)
  */
 static void do_frq(const struct str *seq, unsigned len, char *buf)
 {
-# define dna_combo(nth) (1 << (2 * (nth)))
-  struct freq Freq[16];
-  const long total = seq->len - len + 1;
-  long i, combos = dna_combo(len);
-  
-  memset(Freq, 0, sizeof Freq);
-  
-  for (i = 0; i < combos; i++)
-    Freq[i].len = len;
-  
-  for (i = 0; i < total; i++) {
-    unsigned h = dna_hash(seq->str + i, len);
-    Freq[h].cnt++;
-    if (!Freq[h].str)
-      Freq[h].str = (char*)seq->str + i;
-  }
-  
-  qsort(Freq, combos, sizeof *Freq, freqcmp);
-  
-  for (i = 0; i < combos; i++)
-    buf += sprintf(buf, "%.*s %5.3f\n",
-      len, Freq[i].str, (double)Freq[i].cnt / total * 100.);
-  strcat(buf, "\n");
+  mark(" >do_freq(%u)\n", len);
+  struct ht *t = malloc(sizeof *t);
+  unsigned long long cnt = dna_combo(len);
+  htinit(t, cnt);
+  struct htentry *e = malloc(cnt * sizeof *e);
+  unsigned long total = do_freq_build(t, seq, len);
+  cnt = do_freq_copy(t, e);
+  qsort(e, cnt, sizeof *e, freqcmp);
+  do_freq_print(e, cnt, total, buf);
+  free(e), htfree(t), free(t);
+  mark(" <do_freq(%u)\n", len);
 }
 
 static void frq(const struct str *seq, char *out)
@@ -122,49 +156,19 @@ static void frq(const struct str *seq, char *out)
 }
 
 /*
- * initialize Boyer-Moore-Horspool skip table
- */
-static void bmh_init(const char * restrict needle,
-                          ssize_t nlen, size_t skip[])
-{
-  size_t i, last = nlen - 1;
-  for (i = 0; i <= UCHAR_MAX; i++)
-    skip[i] = nlen;
-  for (i = 0; i < last; i++)
-    skip[(unsigned char)needle[i]] = last - i;
-}
-
-/*
- * Boyer-Moore-Horspool string search
- */
-static const char * bmh(const char * restrict haystack, size_t hlen,
-                        const char * restrict needle,   size_t nlen,
-                        const size_t skip[])
-{
-  const size_t last = nlen - 1;
-  while (hlen >= nlen) {
-    for (size_t i = last; haystack[i] == needle[i]; i--)
-      if (!i) return haystack;
-    hlen     -= skip[(unsigned char)haystack[last]];
-    haystack += skip[(unsigned char)haystack[last]];
-  }
-  return NULL;
-}
-
-/*
- * count instances of substring Match[0..len-1] in string buf
+ * count all 'buf' substrings of length 'len', return count for buf[0..len-1]
  */
 static void do_cnt(const struct str *seq, unsigned len, char *buf)
 {
   static const char *Match = "GGTATTTTAATTTATAGT";
-  size_t skip[UCHAR_MAX + 1];
-  const char *next = seq->str - 1;
-  size_t left = seq->len;
-  unsigned long c = 0;
-  bmh_init(Match, len, skip);
-  while ((next = bmh(next + 1, left, Match, len, skip)))
-    c++, left = seq->len - (next - seq->str) - 1;
-  sprintf(buf, "%lu\t%.*s\n", c, len, Match);
+  mark(" >do_cnt(key=%.*s len=%u)\n", len, Match, len);
+  struct ht *t = malloc(sizeof *t);
+  htinit(t, dna_combo(len));
+  (void)do_freq_build(t, seq, len);
+  struct htentry *e = htfind(t, buf, len, index(buf, len));
+  sprintf(buf, "%lu\t%.*s\n", e ? e->cnt : -1UL, len, Match);
+  htfree(t), free(t);
+  mark(" <do_cnt(key=%.*s len=%u)\n", len, Match, len);
 }
 
 /*
@@ -177,7 +181,7 @@ static void cnt(const struct str *seq, char *out) {
     unsigned prefix;
     char result[64];
   } Cnt[5] = { { 3, "" }, { 4, "" }, { 6, "" }, { 12, "" }, { 18, "" } };
-# pragma omp parallel for
+# pragma omp parallel
   for (int i = 0; i < 5; i++)
     do_cnt(seq, Cnt[i].prefix, Cnt[i].result);
   for (int i = 0; i < 5; i++)
@@ -210,6 +214,8 @@ static const struct str * dna_seq3(void)
 int main(void)
 {
   static char buf[2][4096];
+  gettimeofday(&StartTV, NULL);
+  Start = (StartTV.tv_sec * 1000000. + StartTV.tv_usec) / 1000000.;
   const struct str *seq = dna_seq3();
 # pragma omp sections
   {
