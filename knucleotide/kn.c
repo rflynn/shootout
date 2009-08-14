@@ -6,8 +6,8 @@
  * Contributed by Ryan Flynn
  *
  * Compile:
- *  CFLAGS = -W -Wall -std=c99 -fopenmp -m32 -Os -fomit-frame-pointer -march=core2 -mtune=core2
- * LDFLAGS = -lgomp -m32
+ *  CFLAGS = -W -Wall -std=c99 -fopenmp -m32 -Os -march=core2 -mtune=core2
+ *  LDFLAGS = -lgomp -m32
  */
 
 #include <assert.h>
@@ -19,11 +19,14 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include <sys/time.h>
-#define HT_BINS (16 * 1024 * 1024)
+
+#define HT_BINS     (1024 * 1024 * 16UL)
 #include "ht.h"
 
+#define MAX_ENTRIES (1024 * 1024 * 1024UL)
+
 #undef BUFSZ
-#define BUFSZ (512 * 1024)
+#define BUFSZ       (1024 * 512)
 
 struct str {
   char  *str;
@@ -58,12 +61,16 @@ static void str_grow(struct str *s, size_t len)
     s->str[s->len] = (char)toupper((int)s->str[s->len]), s->len++;
 }
 
-/* uniquely hash a DNA sequence */
+/*
+ * uniquely hash a DNA sequence
+ */
 inline unsigned long dna_hash(const char *dna, unsigned len)
 {
   unsigned long h = 0;
   while (len--)
-    h = (h << 2) + (*dna > 'A') + (*dna > 'C') + (*dna > 'G'), dna++;
+    h = (h << 2) + (*dna > 'A') +
+                   (*dna > 'C') +
+                   (*dna > 'G'), dna++;
   return h;
 }
 
@@ -72,7 +79,8 @@ inline unsigned long dna_hash(const char *dna, unsigned len)
 static unsigned long do_freq_build(struct ht *t, const struct str *seq, unsigned len) {
   const unsigned long total = seq->len - len + 1;
   const char *key = seq->str;
-  for (unsigned long i = 0; i < total; i++)
+  unsigned long i;
+  for (i = 0; i < total; i++)
     htincr(t, key, len, index(key, len)), key++;
   return total;
 }
@@ -106,6 +114,7 @@ static void do_freq_print(const struct htentry *e, unsigned cnt,
 }
 
 #define dna_combo(nth) (1ULL << (2 * (nth)))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 /*
  * count all the 1-nucleotide and 2-nucleotide sequences, and write the
@@ -116,7 +125,7 @@ static void do_frq(const struct str *seq, unsigned len, char *buf)
 {
   struct ht *t = malloc(sizeof *t);
   unsigned long long cnt = dna_combo(len);
-  htinit(t, cnt);
+  htinit(t, MIN(cnt, MAX_ENTRIES));
   struct htentry *e = malloc(cnt * sizeof *e);
   unsigned long total = do_freq_build(t, seq, len);
   cnt = do_freq_copy(t, e);
@@ -141,12 +150,15 @@ static void frq(const struct str *seq, char *out)
 static void do_cnt(const struct str *seq, unsigned len, char *buf)
 {
   static const char *Match = "GGTATTTTAATTTATAGT";
+  struct htentry *e;
   struct ht *t = malloc(sizeof *t);
-  htinit(t, dna_combo(len));
-  (void)do_freq_build(t, seq, len);
-  struct htentry *e = htfind(t, Match, len, index(Match, len));
+  unsigned long long bump = MIN(dna_combo(len), MAX_ENTRIES);
+  htinit(t, bump);
+  do_freq_build(t, seq, len);
+  e = htfind(t, Match, len, index(Match, len));
   sprintf(buf, "%lu\t%.*s\n", e ? e->cnt : 0, len, Match);
-  htfree(t), free(t);
+  htfree(t);
+  free(t);
 }
 
 /*
@@ -158,11 +170,18 @@ static void cnt(const struct str *seq, char *out) {
   struct {
     unsigned prefix;
     char result[64];
-  } Cnt[5] = { { 3, "" }, { 4, "" }, { 6, "" }, { 12, "" }, { 18, "" } };
-# pragma omp parallel
-  for (int i = 0; i < 5; i++)
+  } Cnt[] = {
+    {  3, "" },
+    {  4, "" },
+    {  6, "" },
+    { 12, "" },
+    { 18, "" }
+  };
+  int i;
+# pragma omp parallel for
+  for (i = 0; i < 5; i++)
     do_cnt(seq, Cnt[i].prefix, Cnt[i].result);
-  for (int i = 0; i < 5; i++)
+  for (i = 0; i < 5; i++)
     strcat(out, Cnt[i].result);
 }
 
