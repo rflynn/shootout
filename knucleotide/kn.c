@@ -147,7 +147,7 @@ static void do_frq(const struct str *seq, unsigned len, char *buf)
 static void frq(const struct str *seq, char *out)
 {
   char buf[2][512];
-# pragma omp parallel
+# pragma omp parallel for
   for (int i = 0; i < 2; i++)
     do_frq(seq, i+1, buf[i]);
   for (int i = 0; i < 2; i++)
