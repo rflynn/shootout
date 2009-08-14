@@ -6,8 +6,8 @@
  * Contributed by Ryan Flynn
  *
  * Compile:
- *  CFLAGS = -fopenmp -std=c99 -pedantic -W -Wall -O3
- *  LDFLAGS = -lgomp
+ *  CFLAGS = -W -Wall -std=c99 -fopenmp -m32 -Os -fomit-frame-pointer -march=core2 -mtune=core2
+ * LDFLAGS = -lgomp -m32
  */
 
 #include <assert.h>
@@ -86,8 +86,7 @@ inline unsigned long dna_hash(const char *dna, unsigned len)
 
 #define index(key, len) (dna_hash(key, len) & (HT_BINS - 1))
 
-static unsigned long do_freq_build(struct ht *t,
-                                   const struct str *seq, unsigned len) {
+static unsigned long do_freq_build(struct ht *t, const struct str *seq, unsigned len) {
   const unsigned long total = seq->len - len + 1;
   const char *key = seq->str;
   for (unsigned long i = 0; i < total; i++)
@@ -148,7 +147,7 @@ static void do_frq(const struct str *seq, unsigned len, char *buf)
 static void frq(const struct str *seq, char *out)
 {
   char buf[2][512];
-# pragma omp parallel for
+# pragma omp parallel
   for (int i = 0; i < 2; i++)
     do_frq(seq, i+1, buf[i]);
   for (int i = 0; i < 2; i++)
@@ -165,8 +164,8 @@ static void do_cnt(const struct str *seq, unsigned len, char *buf)
   struct ht *t = malloc(sizeof *t);
   htinit(t, dna_combo(len));
   (void)do_freq_build(t, seq, len);
-  struct htentry *e = htfind(t, buf, len, index(buf, len));
-  sprintf(buf, "%lu\t%.*s\n", e ? e->cnt : -1UL, len, Match);
+  struct htentry *e = htfind(t, Match, len, index(Match, len));
+  sprintf(buf, "%lu\t%.*s\n", e ? e->cnt : 0, len, Match);
   htfree(t), free(t);
   mark(" <do_cnt(key=%.*s len=%u)\n", len, Match, len);
 }

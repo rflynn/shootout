@@ -25,7 +25,7 @@ void htfree(struct ht *t)
 struct htentry * htfind(struct ht *t, const char *key, size_t len, unsigned long idx)
 {
   struct htentry *h = t->bin[idx];
-  while (h && memcmp(h->key, key, len))
+  while (h && (h->len != len || memcmp(h->key, key, len)))
     h = h->next;
   return h;
 }
