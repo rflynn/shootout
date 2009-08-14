@@ -25,23 +25,6 @@
 #undef BUFSZ
 #define BUFSZ (512 * 1024)
 
-static struct timeval StartTV;
-static double Start;
-#if 0
-static void mark(const char *fmt, ...)
-{
-  struct timeval now;
-  gettimeofday(&now, NULL);
-  double total = (now.tv_sec * 1000000. + now.tv_usec) / 1000000.;
-  printf("%.3f ", total - Start);
-  va_list ap;
-  va_start(ap, fmt);
-  vprintf(fmt, ap);
-  va_end(ap);
-}
-#endif
-#define mark(fmt,...)
-
 struct str {
   char  *str;
   size_t len, alloc;
@@ -131,7 +114,6 @@ static void do_freq_print(const struct htentry *e, unsigned cnt,
  */
 static void do_frq(const struct str *seq, unsigned len, char *buf)
 {
-  mark(" >do_freq(%u)\n", len);
   struct ht *t = malloc(sizeof *t);
   unsigned long long cnt = dna_combo(len);
   htinit(t, cnt);
@@ -141,7 +123,6 @@ static void do_frq(const struct str *seq, unsigned len, char *buf)
   qsort(e, cnt, sizeof *e, freqcmp);
   do_freq_print(e, cnt, total, buf);
   free(e), htfree(t), free(t);
-  mark(" <do_freq(%u)\n", len);
 }
 
 static void frq(const struct str *seq, char *out)
@@ -160,14 +141,12 @@ static void frq(const struct str *seq, char *out)
 static void do_cnt(const struct str *seq, unsigned len, char *buf)
 {
   static const char *Match = "GGTATTTTAATTTATAGT";
-  mark(" >do_cnt(key=%.*s len=%u)\n", len, Match, len);
   struct ht *t = malloc(sizeof *t);
   htinit(t, dna_combo(len));
   (void)do_freq_build(t, seq, len);
   struct htentry *e = htfind(t, Match, len, index(Match, len));
   sprintf(buf, "%lu\t%.*s\n", e ? e->cnt : 0, len, Match);
   htfree(t), free(t);
-  mark(" <do_cnt(key=%.*s len=%u)\n", len, Match, len);
 }
 
 /*
@@ -213,8 +192,6 @@ static const struct str * dna_seq3(void)
 int main(void)
 {
   static char buf[2][4096];
-  gettimeofday(&StartTV, NULL);
-  Start = (StartTV.tv_sec * 1000000. + StartTV.tv_usec) / 1000000.;
   const struct str *seq = dna_seq3();
 # pragma omp sections
   {
