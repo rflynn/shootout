@@ -1,8 +1,13 @@
-/* ex: set ts=2 et:
- * $Id$
+/* ex: set ts=2 et: */
+/*
+ * The Computer Language Benchmarks Game
+ *  <URL: http://shootout.alioth.debian.org/>
  *
- * a knucleotide entry at The Great Programming Language Shootout
+ * Contributed by Ryan Flynn
  *
+ * Compile:
+ *  CFLAGS = -fopenmp -std=c99 -pedantic -W -Wall -O3
+ *  LDFLAGS = -lgomp
  */
 
 #include <stdio.h>
@@ -16,16 +21,6 @@
 #undef BUFSZ
 #define BUFSZ (512 * 1024)
 
-static struct timeval StartTV;
-static double Start;
-static void mark(const char *str)
-{
-  struct timeval now;
-  gettimeofday(&now, NULL);
-  double total = (now.tv_sec * 1000000. + now.tv_usec) / 1000000.;
-  printf("%.3f %s\n", total - Start, str);
-}
-
 struct str {
   char  *str;
   size_t len, alloc;
@@ -37,7 +32,7 @@ static struct str * str_new(void)
   if (!s)
     perror("malloc"), exit(1);
   s->alloc = BUFSZ;
-  s->str = malloc(BUFSZ);
+  s->str = malloc(s->alloc);
   return s;
 }
 
@@ -91,7 +86,6 @@ static int freqcmp(const void *va, const void *vb)
  */
 static void do_frq(const struct str *seq, unsigned len, char *buf)
 {
-  mark(" >do_frq()");
 # define dna_combo(nth) (1 << (2 * (nth)))
   struct freq Freq[16];
   const long total = seq->len - len + 1;
@@ -115,23 +109,22 @@ static void do_frq(const struct str *seq, unsigned len, char *buf)
     buf += sprintf(buf, "%.*s %5.3f\n",
       len, Freq[i].str, (double)Freq[i].cnt / total * 100.);
   strcat(buf, "\n");
-  mark(" <do_frq()");
 }
 
 static void frq(const struct str *seq, char *out)
 {
-  mark(">frq()");
   char buf[2][512];
-  #pragma omp parallel for
+# pragma omp parallel for
   for (int i = 0; i < 2; i++)
     do_frq(seq, i+1, buf[i]);
   for (int i = 0; i < 2; i++)
     strcat(out, buf[i]);
-  mark("<frq()");
 }
 
-/* initialize Boyer-Moore-Horspool skip table */
-static void bmh_skip_init(const char * restrict needle,
+/*
+ * initialize Boyer-Moore-Horspool skip table
+ */
+static void bmh_init(const char * restrict needle,
                           ssize_t nlen, size_t skip[])
 {
   size_t i, last = nlen - 1;
@@ -141,7 +134,9 @@ static void bmh_skip_init(const char * restrict needle,
     skip[(unsigned char)needle[i]] = last - i;
 }
 
-/* Boyer-Moore-Horspool string search */
+/*
+ * Boyer-Moore-Horspool string search
+ */
 static const char * bmh(const char * restrict haystack, size_t hlen,
                         const char * restrict needle,   size_t nlen,
                         const size_t skip[])
@@ -156,38 +151,37 @@ static const char * bmh(const char * restrict haystack, size_t hlen,
   return NULL;
 }
 
-/* count instances of substring Match[0..len-1] in string buf */
+/*
+ * count instances of substring Match[0..len-1] in string buf
+ */
 static void do_cnt(const struct str *seq, unsigned len, char *buf)
 {
-  mark(" >do_cnt()");
+  static const char *Match = "GGTATTTTAATTTATAGT";
   size_t skip[UCHAR_MAX + 1];
-  const char *Match = "GGTATTTTAATTTATAGT";
   const char *next = seq->str - 1;
   size_t left = seq->len;
   unsigned long c = 0;
-  bmh_skip_init(Match, len, skip);
+  bmh_init(Match, len, skip);
   while ((next = bmh(next + 1, left, Match, len, skip)))
     c++, left = seq->len - (next - seq->str) - 1;
   sprintf(buf, "%lu\t%.*s\n", c, len, Match);
-  mark(" <do_cnt()");
 }
 
-/* count all the 3- 4- 6- 12- and 18-nucleotide sequences, and write the
+/*
+ * COUNT ALL THE 3- 4- 6- 12- AND 18-NUCLEOTIDE SEQUENCES, and write the
  * count and code for the specific sequences GGT GGTA GGTATT GGTATTTTAATT
  * GGTATTTTAATTTATAGT
  */
 static void cnt(const struct str *seq, char *out) {
-  mark(">cnt()");
   struct {
     unsigned prefix;
     char result[64];
   } Cnt[5] = { { 3, "" }, { 4, "" }, { 6, "" }, { 12, "" }, { 18, "" } };
-  #pragma omp parallel for
+# pragma omp parallel for
   for (int i = 0; i < 5; i++)
     do_cnt(seq, Cnt[i].prefix, Cnt[i].result);
   for (int i = 0; i < 5; i++)
     strcat(out, Cnt[i].result);
-  mark("<cnt()");
 }
 
 /*
@@ -196,13 +190,10 @@ static void cnt(const struct str *seq, char *out) {
  */
 static const struct str * dna_seq3(void)
 {
-  mark(">dna_seq3()");
   struct str *s = str_new();
-  /* skip until THREE */
   while (NULL != fgets(s->str, BUFSZ, stdin))
     if ('>' == *s->str && !strncmp(">THREE", s->str, 6))
       break;
-  /* extract DNA sequence THREE */
   char *curr = s->str;
   while (NULL != fgets(curr, BUFSZ, stdin)) {
     if ('>' == *curr)
@@ -213,22 +204,19 @@ static const struct str * dna_seq3(void)
     str_grow(s, len);
     curr = s->str + s->len;
   }
-  mark("<dna_seq3()");
   return s;
 }
 
 int main(void)
 {
   static char buf[2][4096];
-  gettimeofday(&StartTV, NULL);
-  Start = (StartTV.tv_sec * 1000000. + StartTV.tv_usec) / 1000000.;
   const struct str *seq = dna_seq3();
-  #pragma omp sections
+# pragma omp sections
   {
     frq(seq, buf[0]);
     cnt(seq, buf[1]);
   }
-  #pragma omp barrier
+# pragma omp barrier
   fputs(buf[0], stdout);
   fputs(buf[1], stdout);
   return 0;
