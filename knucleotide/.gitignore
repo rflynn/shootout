@@ -1,6 +1,6 @@
 *.o
 .*.swp
 gmon.out
-test-big
+test/big
 kn
 kn.out
