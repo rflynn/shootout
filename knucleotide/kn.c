@@ -239,9 +239,8 @@ int main(void)
       cnt(&seq, buf[1]);
     }
     #pragma omp barrier
-    fputs(buf[0], stdout);
     for (int i = 0; i < 2; i++)
-      fputs(buf[0], stdout);
+      fputs(buf[i], stdout);
   }
   return 0;
 }
