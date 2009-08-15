@@ -70,18 +70,20 @@ static void str_grow(struct str *s, size_t len)
 }
 
 /*
- * uniquely hash a DNA sequence
+ * hash a DNA sequence
  */
 inline unsigned long dna_hash(const char *dna, unsigned len)
 {
+  static const unsigned char X[UCHAR_MAX + 1] =
+  {
+    ['A'] = 0,
+    ['C'] = 1,
+    ['G'] = 2,
+    ['T'] = 3,
+  };
   unsigned long h = 0;
   while (len--)
-#if 0
-    h = (h << 2) + ((*dna++ - 1) & 3);
-#endif
-    h = (h << 2) + (*dna > 'A') +
-                   (*dna > 'C') +
-                   (*dna > 'G'), dna++;
+    h = (h << 2) + X[(unsigned char)*dna++];
   return h;
 }
 
