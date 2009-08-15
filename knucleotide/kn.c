@@ -83,7 +83,7 @@ inline unsigned long dna_hash(const char *dna, unsigned len)
   };
   unsigned long h = 0;
   while (len--)
-    h = (h << 2) + X[(unsigned char)*dna++];
+    h = (h << 2) | X[(unsigned char)*dna++];
   return h;
 }
 
