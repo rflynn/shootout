@@ -14,16 +14,12 @@
  *  all hash tables in parallel by each line.
  */
 
-#include <assert.h>
 #include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
-#include <stdarg.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 #include <unistd.h>
 #include "ht.h"
 
@@ -100,8 +96,7 @@ inline unsigned long dna_hash(const char *dna, unsigned len)
 static unsigned long freq_build(struct ht *t, const struct str *seq, unsigned len) {
   const unsigned long total = seq->len - len + 1;
   const char *key = seq->str;
-  unsigned long i;
-  for (i = 0; i < total; i++)
+  for (unsigned long i = 0; i < total; i++)
     htincr(t, key, len, index(key, len)), key++;
   return total;
 }
@@ -112,7 +107,7 @@ static unsigned long freq_build(struct ht *t, const struct str *seq, unsigned le
 static int freq_cmp(const void *va, const void *vb)
 {
   const struct htentry *a = va, *b = vb;
-  if (b->val.cnt != a->val.cnt)
+  if (a->val.cnt != b->val.cnt)
     return (int)(b->val.cnt - a->val.cnt);
   return strcmp(b->key, a->key);
 }
@@ -169,9 +164,8 @@ static void do_cnt(const struct str *seq, unsigned len, char *buf)
   if (len <= seq->len) {
     struct ht t;
     htinit(&t, HT_BINS, MIN(dna_combo(len), MAX_ENTRIES));
-    struct htentry *e;
     freq_build(&t, seq, len);
-    e = htfind(&t, Match, len, index(Match, len));
+    struct htentry *e = htfind(&t, Match, len, index(Match, len));
     if (e)
       cnt = e->val.cnt;
     showmem();
