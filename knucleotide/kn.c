@@ -23,14 +23,15 @@
 #define HT_BINS     (1024 * 1024 * 32UL) /* NOTE: power of 2 */
 #define MAX_ENTRIES (HT_BINS * 2)
 
+/* Linux-specific */
 static void showmem(void)
 {
   FILE *f = fopen("/proc/self/statm", "r");
   char line[64];
   if (fgets(line, sizeof line, f)) {
-    unsigned long n[2];
-    if (2 == sscanf(line, "%lu %lu ", n, n+1))
-      printf("%luM\n", (n[1] * 4096) / (1024 * 1024));
+    unsigned long _, pagecnt;
+    if (2 == sscanf(line, "%lu %lu ", &_, &pagecnt))
+      printf("%luM\n", (pagecnt * sysconf(_SC_PAGESIZE)) / (1024 * 1024));
   }
   fclose(f);
 }
@@ -133,6 +134,7 @@ static void freq_print(const struct htentry *e, unsigned cnt,
  */
 static void do_freq(const struct str *seq, unsigned len, char *buf)
 {
+  printf(">do_freq(%.*s)\n", len, seq->str);
   unsigned long long cnt = dna_combo(len);
   struct ht t;
   htinit(&t, HT_BINS, MIN(cnt, MAX_ENTRIES));
@@ -146,6 +148,7 @@ static void do_freq(const struct str *seq, unsigned len, char *buf)
   }
   showmem();
   htfree(&t);
+  printf("<do_freq(%.*s)\n", len, seq->str);
 }
 
 static void frq(const struct str *seq, char *out)
@@ -191,17 +194,17 @@ static void cnt(const struct str *seq, char *out) {
     unsigned len;
     char res[64];
   } Cnt[] = {
-    { 18, "" },
-    { 12, "" },
-    {  6, "" },
+    {  3, "" },
     {  4, "" },
-    {  3, "" }
+    {  6, "" },
+    { 12, "" },
+    { 18, "" },
   };
 # define CNT (int)(sizeof Cnt / sizeof Cnt[0])
 # pragma omp parallel for schedule(static,1)
-  for (int i = 0; i < CNT; i++)
-    do_cnt(seq, Cnt[i].len, Cnt[i].res);
   for (int i = CNT - 1; i >= 0; i--)
+    do_cnt(seq, Cnt[i].len, Cnt[i].res);
+  for (int i = 0; i < CNT; i++)
     strcat(out, Cnt[i].res);
 }
 
@@ -236,11 +239,11 @@ int main(void)
     return 1;
 # pragma omp sections
   {
-    frq(seq, buf[0]);
-    cnt(seq, buf[1]);
+    cnt(seq, buf[0]);
+    frq(seq, buf[1]);
   }
 # pragma omp barrier
-  fputs(buf[0], stdout);
   fputs(buf[1], stdout);
+  fputs(buf[0], stdout);
   return 0;
 }
