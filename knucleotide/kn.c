@@ -34,14 +34,16 @@
 static void showmem(void)
 {
   FILE *f = fopen("/proc/self/statm", "r");
-  char line[64];
-  if (fgets(line, sizeof line, f)) {
-    long _, pagecnt;
-    if (2 == sscanf(line, "%ld %ld ", &_, &pagecnt))
-      fprintf(stderr, "%ldM\n",
-        (pagecnt * sysconf(_SC_PAGESIZE)) / (1024 * 1024));
+  if (f) {
+    char line[64];
+    if (fgets(line, sizeof line, f)) {
+      long _, pagecnt;
+      if (2 == sscanf(line, "%ld %ld ", &_, &pagecnt))
+        fprintf(stderr, "%ldM\n",
+          (pagecnt * sysconf(_SC_PAGESIZE)) / (1024 * 1024));
+    }
+    fclose(f);
   }
-  fclose(f);
 }
 #endif
 
