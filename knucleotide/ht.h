@@ -1,4 +1,10 @@
 /* ex: set ts=2 et : */
+/*
+ * a simplistic zero-copy hash table
+ * caller must
+ *    know max keys in advance
+ *    implement hash function
+ */
 
 #ifndef HT_H
 #define HT_H
@@ -9,13 +15,16 @@ struct htentry {
   const char     *key;
   size_t          len;
   struct htentry *nxt;
-  unsigned long   cnt;
+  union {
+    unsigned long cnt;
+    void         *ptr;
+  } val;
 };
 
 struct ht {
-  struct htentry *nxt,
-                 *bmp,
-                **bin;
+  struct htentry *nxt,    /* next htentry */
+                 *bmp,    /* vector of pre-allocated htentry */
+                **bin;    /* list heads */
   unsigned long   bincnt;
 };
 

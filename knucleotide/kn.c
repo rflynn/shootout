@@ -8,6 +8,10 @@
  * Compile:
  *  CFLAGS = -W -Wall -std=c99 -pedantic -fopenmp -m32 -Os -DNDEBUG
  *  LDFLAGS = -lgomp -m32
+ *
+ * Shortcomings:
+ *  I/O done completely serially; improve by incrementally building
+ *  all hash tables in parallel by each line.
  */
 
 #include <assert.h>
@@ -52,19 +56,15 @@ struct str {
   size_t len, alloc;
 };
 
-static struct str * str_new(void)
+static void str_init(struct str *s)
 {
-  struct str *s = calloc(sizeof *s, 1);
-  if (!s)
-    perror("malloc"), exit(1);
+  s->len = 0;
   s->alloc = BUFSZ;
   s->str = malloc(s->alloc);
-  return s;
 }
 
 /*
- * 'len' bytes have been written, grow buffer if needed; there must
- * always be >= BUFSZ bytes free at the end
+ * 'len' bytes written, grow if needed; ensure >= BUFSZ available
  */
 static void str_grow(struct str *s, size_t len)
 {
@@ -80,9 +80,6 @@ static void str_grow(struct str *s, size_t len)
     s->str[s->len] = (char)toupper((int)s->str[s->len]), s->len++;
 }
 
-/*
- * hash a DNA sequence
- */
 inline unsigned long dna_hash(const char *dna, unsigned len)
 {
   static const unsigned char X[UCHAR_MAX + 1] =
@@ -109,21 +106,24 @@ static unsigned long freq_build(struct ht *t, const struct str *seq, unsigned le
   return total;
 }
 
+/*
+ * sorted by descending frequency and then ascending k-nucleotide key
+ */
 static int freq_cmp(const void *va, const void *vb)
 {
   const struct htentry *a = va, *b = vb;
-  if (b->cnt != a->cnt)
-    return (int)(b->cnt - a->cnt);
+  if (b->val.cnt != a->val.cnt)
+    return (int)(b->val.cnt - a->val.cnt);
   return strcmp(b->key, a->key);
 }
 
 static void freq_print(const struct htentry *e, unsigned cnt,
-                       unsigned long total, char *buf)
+                       unsigned long total, char *dst)
 {
   while (cnt--)
-    buf += sprintf(buf, "%.*s %5.3f\n",
-      (unsigned)e->len, e->key, (double)e->cnt / total * 100.), e++;
-  strcat(buf, "\n");
+    dst += sprintf(dst, "%.*s %5.3f\n",
+      (unsigned)e->len, e->key, 100. * e->val.cnt / total), e++;
+  strcat(dst, "\n");
 }
 
 #define dna_combo(nth) (1ULL << (2 * (nth)))
@@ -134,16 +134,15 @@ static void freq_print(const struct htentry *e, unsigned cnt,
  * code and percentage frequency, sorted by descending frequency and then
  * ascending k-nucleotide key
  */
-static void do_freq(const struct str *seq, unsigned len, char *buf)
+static void do_freq(const struct str *seq, unsigned len, char *dst)
 {
-  unsigned long total;
   struct ht t;
   htinit(&t, HT_BINS, MIN(dna_combo(len), MAX_ENTRIES));
-  total = freq_build(&t, seq, len);
+  unsigned long total = freq_build(&t, seq, len);
   {
     struct htentry *e = ht2vec(&t);
     qsort(e, htsize(&t), sizeof *e, freq_cmp);
-    freq_print(e, htsize(&t), total, buf);
+    freq_print(e, htsize(&t), total, dst);
     free(e);
   }
   showmem();
@@ -153,7 +152,7 @@ static void do_freq(const struct str *seq, unsigned len, char *buf)
 static void frq(const struct str *seq, char *out)
 {
   char buf[2][512];
-# pragma omp parallel for
+  #pragma omp parallel for
   for (int i = 0; i < 2; i++)
     do_freq(seq, i+1, buf[i]);
   for (int i = 0; i < 2; i++)
@@ -165,7 +164,7 @@ static void frq(const struct str *seq, char *out)
  */
 static void do_cnt(const struct str *seq, unsigned len, char *buf)
 {
-  static const char *Match = "GGTATTTTAATTTATAGT";
+  const char *Match = "GGTATTTTAATTTATAGT";
   unsigned long cnt = 0;
   if (len <= seq->len) {
     struct ht t;
@@ -174,7 +173,7 @@ static void do_cnt(const struct str *seq, unsigned len, char *buf)
     freq_build(&t, seq, len);
     e = htfind(&t, Match, len, index(Match, len));
     if (e)
-      cnt = e->cnt;
+      cnt = e->val.cnt;
     showmem();
     htfree(&t);
   }
@@ -186,6 +185,7 @@ static void do_cnt(const struct str *seq, unsigned len, char *buf)
  * count and code for the specific sequences GGT GGTA GGTATT GGTATTTTAATT
  * GGTATTTTAATTTATAGT
  */
+#define CNT (int)(sizeof Cnt / sizeof Cnt[0])
 static void cnt(const struct str *seq, char *out) {
   struct {
     unsigned len;
@@ -197,21 +197,21 @@ static void cnt(const struct str *seq, char *out) {
     { 12, "" },
     { 18, "" },
   };
-# define CNT (int)(sizeof Cnt / sizeof Cnt[0])
-# pragma omp parallel for schedule(static,1)
+  #pragma omp parallel for schedule(static,1)
   for (int i = CNT - 1; i >= 0; i--)
     do_cnt(seq, Cnt[i].len, Cnt[i].res);
   for (int i = 0; i < CNT; i++)
     strcat(out, Cnt[i].res);
 }
+#undef CNT
 
 /*
  * read line-by-line a redirected FASTA format file from stdin
  * extract DNA sequence THREE
  */
-static const struct str * dna_seq3(void)
+static void dna_seq3(struct str *s)
 {
-  struct str *s = str_new();
+  str_init(s);
   while (NULL != fgets(s->str, BUFSZ, stdin))
     if ('>' == *s->str && !strncmp(">THREE", s->str, 6))
       break;
@@ -225,22 +225,23 @@ static const struct str * dna_seq3(void)
     str_grow(s, len);
     curr = s->str + s->len;
   }
-  return s;
 }
 
 int main(void)
 {
-  static char buf[2][4096];
-  const struct str *seq = dna_seq3();
-  if (!seq->len)
-    return 1;
-# pragma omp sections
-  {
-    cnt(seq, buf[0]);
-    frq(seq, buf[1]);
+  char *buf[2] = { malloc(1024), malloc(1024) };
+  struct str seq;
+  dna_seq3(&seq);
+  if (seq.len) {
+    #pragma omp sections
+    {
+      frq(&seq, buf[0]);
+      cnt(&seq, buf[1]);
+    }
+    #pragma omp barrier
+    fputs(buf[0], stdout);
+    for (int i = 0; i < 2; i++)
+      fputs(buf[0], stdout);
   }
-# pragma omp barrier
-  fputs(buf[1], stdout);
-  fputs(buf[0], stdout);
   return 0;
 }

@@ -28,7 +28,7 @@ static inline void htentrynew(struct ht *t, const char *key, size_t len, unsigne
   e->nxt = t->bin[idx];
   e->key = key;
   e->len = len;
-  e->cnt = 1;
+  e->val.cnt = 1;
   t->bin[idx] = e;
 }
 
@@ -36,7 +36,7 @@ void htincr(struct ht *t, const char *key, size_t len, unsigned long idx)
 {
   struct htentry *e = htfind(t, key, len, idx);
   if (e)
-    e->cnt++;
+    e->val.cnt++;
   else
     htentrynew(t, key, len, idx);
 }
