@@ -14,11 +14,6 @@ void htinit(struct ht *t, unsigned long bincnt, unsigned long long bmp)
   t->bincnt = bincnt;
 }
 
-void htfree(struct ht *t)
-{
-  free(t->bmp);
-}
-
 struct htentry * htfind(struct ht *t, const char *key, size_t len, unsigned long idx)
 {
   struct htentry *h = t->bin[idx];
@@ -27,7 +22,7 @@ struct htentry * htfind(struct ht *t, const char *key, size_t len, unsigned long
   return h;
 }
 
-static void htentrynew(struct ht *t, const char *key, size_t len, unsigned long idx)
+static inline void htentrynew(struct ht *t, const char *key, size_t len, unsigned long idx)
 {
   struct htentry *e = t->nxt++;
   e->nxt = t->bin[idx];
@@ -46,33 +41,27 @@ void htincr(struct ht *t, const char *key, size_t len, unsigned long idx)
     htentrynew(t, key, len, idx);
 }
 
-static int hteach_find(struct hteach *e, const struct ht *t)
+/*
+ * allocate a vector and populate with contents of hash table
+ */
+struct htentry * ht2vec(const struct ht *t)
 {
-  unsigned long idx = e->idx;
-  do
-    ++idx;
-  while (t->bincnt != idx && !t->bin[idx]);
-  if (t->bincnt == idx)
-    return 0;
-  e->idx = idx;
-  e->cur = t->bin[idx];
-  return 1;
-}
-
-int hteach_init(struct hteach *e, const struct ht *t)
-{
-  e->idx = 0;
-  if (!t->bin[0])
-    return hteach_find(e, t);
-  e->cur = t->bin[0];
-  return 1;
-}
-
-int hteach_next(struct hteach *e, const struct ht *t)
-{
-  if (!e->cur->nxt)
-    return hteach_find(e, t);
-  e->cur = e->cur->nxt;
-  return 1;
+  if (!htsize(t))
+    return NULL;
+  struct htentry *v = malloc(htsize(t) * sizeof *v);
+  struct htentry *w = v;
+  unsigned long idx = 0;
+  do {
+    while (idx < t->bincnt && !t->bin[idx])
+      ++idx;
+    if (idx < t->bincnt) {
+      const struct htentry *r = t->bin[idx];
+      do
+        *w++ = *r;
+      while ((r = r->nxt));
+      ++idx;
+    }
+  } while (idx < t->bincnt);
+  return v;
 }
 

@@ -6,9 +6,9 @@
 #include <stdlib.h>
 
 struct htentry {
-  struct htentry *nxt;
   const char     *key;
   size_t          len;
+  struct htentry *nxt;
   unsigned long   cnt;
 };
 
@@ -22,15 +22,9 @@ struct ht {
 void              htinit(struct ht *, unsigned long, unsigned long long);
 void              htincr(struct ht *, const char *, size_t, unsigned long);
 struct htentry *  htfind(struct ht *, const char *, size_t, unsigned long);
-void              htfree(struct ht *);
-
-struct hteach {
-  struct htentry *cur;
-  unsigned long   idx;
-};
-
-int               hteach_init(struct hteach *, const struct ht *);
-int               hteach_next(struct hteach *, const struct ht *);
+struct htentry *  ht2vec(const struct ht *t);
+inline ptrdiff_t  htsize(const struct ht *t){ return t->nxt - t->bmp; }
+inline void       htfree(struct ht *t){ free(t->bmp); }
 
 #endif
 

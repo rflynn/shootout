@@ -4,6 +4,10 @@
  *  <URL: http://shootout.alioth.debian.org/>
  *
  * Contributed by Ryan Flynn
+ *
+ * Compile:
+ *  CFLAGS = -W -Wall -std=c99 -pedantic -fopenmp -m32 -Os -DNDEBUG
+ *  LDFLAGS = -lgomp -m32
  */
 
 #include <assert.h>
@@ -23,18 +27,23 @@
 #define HT_BINS     (1024 * 1024 * 32UL) /* NOTE: power of 2 */
 #define MAX_ENTRIES (HT_BINS * 2)
 
-/* Linux-specific */
+/* Linux-specific memory-usage printing */
+#ifdef NDEBUG
+# define showmem()
+#else
 static void showmem(void)
 {
   FILE *f = fopen("/proc/self/statm", "r");
   char line[64];
   if (fgets(line, sizeof line, f)) {
-    unsigned long _, pagecnt;
-    if (2 == sscanf(line, "%lu %lu ", &_, &pagecnt))
-      printf("%luM\n", (pagecnt * sysconf(_SC_PAGESIZE)) / (1024 * 1024));
+    long _, pagecnt;
+    if (2 == sscanf(line, "%ld %ld ", &_, &pagecnt))
+      fprintf(stderr, "%ldM\n",
+        (pagecnt * sysconf(_SC_PAGESIZE)) / (1024 * 1024));
   }
   fclose(f);
 }
+#endif
 
 struct str {
   char  *str;
@@ -98,18 +107,7 @@ static unsigned long freq_build(struct ht *t, const struct str *seq, unsigned le
   return total;
 }
 
-static ptrdiff_t freq_copy(const struct ht *t, struct htentry *e)
-{
-  struct htentry *c = e;
-  struct hteach each;
-  if (hteach_init(&each, t))
-    do
-      *c++ = *each.cur;
-    while (hteach_next(&each, t));
-  return c - e;
-}
-
-static int freqcmp(const void *va, const void *vb)
+static int freq_cmp(const void *va, const void *vb)
 {
   const struct htentry *a = va, *b = vb;
   if (b->cnt != a->cnt)
@@ -118,7 +116,7 @@ static int freqcmp(const void *va, const void *vb)
 }
 
 static void freq_print(const struct htentry *e, unsigned cnt,
-                          unsigned long total, char *buf)
+                       unsigned long total, char *buf)
 {
   while (cnt--)
     buf += sprintf(buf, "%.*s %5.3f\n",
@@ -136,21 +134,18 @@ static void freq_print(const struct htentry *e, unsigned cnt,
  */
 static void do_freq(const struct str *seq, unsigned len, char *buf)
 {
-  printf(">do_freq(%.*s)\n", len, seq->str);
-  unsigned long long cnt = dna_combo(len);
+  unsigned long total;
   struct ht t;
-  htinit(&t, HT_BINS, MIN(cnt, MAX_ENTRIES));
-  unsigned long total = freq_build(&t, seq, len);
+  htinit(&t, HT_BINS, MIN(dna_combo(len), MAX_ENTRIES));
+  total = freq_build(&t, seq, len);
   {
-    struct htentry *e = malloc(cnt * sizeof *e);
-    cnt = freq_copy(&t, e);
-    qsort(e, cnt, sizeof *e, freqcmp);
-    freq_print(e, cnt, total, buf);
+    struct htentry *e = ht2vec(&t);
+    qsort(e, htsize(&t), sizeof *e, freq_cmp);
+    freq_print(e, htsize(&t), total, buf);
     free(e);
   }
   showmem();
   htfree(&t);
-  printf("<do_freq(%.*s)\n", len, seq->str);
 }
 
 static void frq(const struct str *seq, char *out)
@@ -168,7 +163,6 @@ static void frq(const struct str *seq, char *out)
  */
 static void do_cnt(const struct str *seq, unsigned len, char *buf)
 {
-  printf(">do_cnt(%.*s)\n", len, seq->str);
   static const char *Match = "GGTATTTTAATTTATAGT";
   unsigned long cnt = 0;
   if (len <= seq->len) {
@@ -183,7 +177,6 @@ static void do_cnt(const struct str *seq, unsigned len, char *buf)
     htfree(&t);
   }
   sprintf(buf, "%lu\t%.*s\n", cnt, len, Match);
-  printf("<do_cnt(%.*s)\n", len, seq->str);
 }
 
 /*
