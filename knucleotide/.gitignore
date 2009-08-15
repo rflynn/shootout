@@ -1,0 +1,6 @@
+*.o
+.*.swp
+gmon.out
+test-big
+kn
+kn.out
