@@ -6,7 +6,8 @@ LDFLAGS = -lgomp -m32
 test: kn testbig
 	time ./kn < test/big
 
-kn: kn.o ht.o
+kn: kn.o
+kn.o: ht.h
 
 testbig:
 	@chmod +x rand-dna.pl
