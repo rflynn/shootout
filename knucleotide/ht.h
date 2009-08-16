@@ -1,4 +1,3 @@
-/* ex: set ts=2 et : */
 /*
  * a simplistic zero-copy hash table
  * caller must

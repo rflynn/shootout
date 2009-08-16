@@ -1,17 +1,8 @@
-/* ex: set ts=2 et: */
 /*
  * The Computer Language Benchmarks Game
  *  <URL: http://shootout.alioth.debian.org/>
  *
  * Contributed by Ryan Flynn
- *
- * Compile:
- *  CFLAGS = -W -Wall -std=c99 -pedantic -fopenmp -m32 -Os -DNDEBUG
- *  LDFLAGS = -lgomp -m32
- *
- * Shortcomings:
- *  I/O done completely serially; improve by incrementally building
- *  all hash tables in parallel by each line.
  */
 
 #include <ctype.h>
@@ -27,26 +18,6 @@
 #define HT_BINS     (1024 * 1024 * 32UL) /* NOTE: power of 2 */
 #define MAX_ENTRIES (HT_BINS * 2)
 
-/* Linux-specific memory-usage printing */
-#ifdef NDEBUG
-# define showmem()
-#else
-static void showmem(void)
-{
-  FILE *f = fopen("/proc/self/statm", "r");
-  if (f) {
-    char line[64];
-    if (fgets(line, sizeof line, f)) {
-      long _, pagecnt;
-      if (2 == sscanf(line, "%ld %ld ", &_, &pagecnt))
-        fprintf(stderr, "%ldM\n",
-          (pagecnt * sysconf(_SC_PAGESIZE)) / (1024 * 1024));
-    }
-    fclose(f);
-  }
-}
-#endif
-
 struct str {
   char  *str;
   size_t len, alloc;
@@ -59,9 +30,6 @@ static void str_init(struct str *s)
   s->str = malloc(s->alloc);
 }
 
-/*
- * 'len' bytes written, grow if needed; ensure >= BUFSZ available
- */
 static void str_grow(struct str *s, size_t len)
 {
   size_t newlen = s->len + len + BUFSZ;
@@ -72,7 +40,7 @@ static void str_grow(struct str *s, size_t len)
     s->alloc = newlen * 2;
     s->str = tmp;
   }
-  while (len--)
+  while (len--) /* uppercase */
     s->str[s->len] = (char)toupper((int)s->str[s->len]), s->len++;
 }
 
@@ -126,8 +94,7 @@ static void freq_print(const struct htentry *e, unsigned cnt,
 
 /*
  * count all the 1-nucleotide and 2-nucleotide sequences, and write the
- * code and percentage frequency, sorted by descending frequency and then
- * ascending k-nucleotide key
+ * code and percentage frequency, sorted
  */
 static void do_freq(const struct str *seq, unsigned len, char *dst)
 {
@@ -140,7 +107,6 @@ static void do_freq(const struct str *seq, unsigned len, char *dst)
     freq_print(e, htsize(&t), total, dst);
     free(e);
   }
-  showmem();
   htfree(&t);
 }
 
@@ -168,7 +134,6 @@ static void do_cnt(const struct str *seq, unsigned len, char *buf)
     struct htentry *e = htfind(&t, Match, len, index(Match, len));
     if (e)
       cnt = e->val.cnt;
-    showmem();
     htfree(&t);
   }
   sprintf(buf, "%lu\t%.*s\n", cnt, len, Match);
@@ -197,7 +162,6 @@ static void cnt(const struct str *seq, char *out) {
   for (int i = 0; i < CNT; i++)
     strcat(out, Cnt[i].res);
 }
-#undef CNT
 
 /*
  * read line-by-line a redirected FASTA format file from stdin
@@ -223,7 +187,7 @@ static void dna_seq3(struct str *s)
 
 int main(void)
 {
-  char *buf[2] = { malloc(1024), malloc(1024) };
+  char buf[2][1024];
   struct str seq;
   dna_seq3(&seq);
   if (seq.len) {

@@ -1,4 +1,3 @@
-/* ex: set ts=2 et: */
 
 #include <assert.h>
 #include <stdio.h>
