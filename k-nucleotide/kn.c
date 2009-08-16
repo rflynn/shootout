@@ -20,29 +20,29 @@
 #define dna_combo(nth) (1ULL << (2 * (nth)))
 #define MIN(a, b)      ((a) < (b) ? (a) : (b))
 
-struct str {
+struct buf {
   char  *str;
   size_t len, alloc;
 };
 
-static void str_init(struct str *s)
+static void buf_init(struct buf *b)
 {
-  s->len = 0;
-  s->alloc = BUFSZ;
-  s->str = malloc(s->alloc);
+  b->len = 0;
+  b->alloc = BUFSZ;
+  b->str = malloc(b->alloc);
 }
 
-static void str_grow(struct str *s, size_t len)
+static void buf_grow(struct buf *b, size_t len)
 {
-  size_t newlen = s->len + len + BUFSZ;
-  if (newlen > s->alloc) {
-    s->alloc = newlen * 2;
-    s->str = realloc(s->str, s->alloc);
-    if (!s->str)
+  size_t newlen = b->len + len + BUFSZ;
+  if (newlen > b->alloc) {
+    b->alloc = newlen * 2;
+    b->str = realloc(b->str, b->alloc);
+    if (!b->str)
       perror("malloc"), exit(1);
   }
   while (len--) /* uppercase */
-    s->str[s->len] = (char)toupper((int)s->str[s->len]), s->len++;
+    b->str[b->len] = (char)toupper((int)b->str[b->len]), b->len++;
 }
 
 inline unsigned long dna_hash(const char *dna, unsigned len)
@@ -62,7 +62,7 @@ inline unsigned long dna_hash(const char *dna, unsigned len)
 
 #define index(key, len) (dna_hash(key, len) & (HT_BINS - 1))
 
-static unsigned long freq_build(struct ht *t, const struct str *seq, unsigned len) {
+static unsigned long freq_build(struct ht *t, const struct buf *seq, unsigned len) {
   const unsigned long total = seq->len - len + 1;
   const char *key = seq->str;
   for (unsigned long i = 0; i < total; i++)
@@ -92,7 +92,7 @@ static void freq_print(const struct htentry *e, unsigned cnt,
 
 /* count all the 1-nucleotide and 2-nucleotide sequences, and write the
  * code and percentage frequency, sorted */
-static void do_freq(const struct str *seq, unsigned len, char *dst)
+static void do_freq(const struct buf *seq, unsigned len, char *dst)
 {
   struct ht t;
   htinit(&t, HT_BINS, MIN(dna_combo(len), MAX_ENTRIES));
@@ -106,7 +106,7 @@ static void do_freq(const struct str *seq, unsigned len, char *dst)
   htfree(&t);
 }
 
-static void frq(const struct str *seq, char *dst)
+static void frq(const struct buf *seq, char *dst)
 {
   char buf[2][512];
   #pragma omp parallel for
@@ -117,7 +117,7 @@ static void frq(const struct str *seq, char *dst)
 }
 
 /* count all 'buf' substrings of length 'len', return count for buf[0..len-1] */
-static void do_cnt(const struct str *seq, unsigned len, char *buf)
+static void do_cnt(const struct buf *seq, unsigned len, char *buf)
 {
   const char *Match = "GGTATTTTAATTTATAGT";
   unsigned long cnt = 0;
@@ -135,7 +135,7 @@ static void do_cnt(const struct str *seq, unsigned len, char *buf)
  * count and code for the specific sequences GGT GGTA GGTATT GGTATTTTAATT
  * GGTATTTTAATTTATAGT */
 #define CNT (int)(sizeof Cnt / sizeof Cnt[0])
-static void cnt(const struct str *seq, char *out) {
+static void cnt(const struct buf *seq, char *out) {
   static struct {
     unsigned len;
     char res[64];
@@ -156,29 +156,29 @@ static void cnt(const struct str *seq, char *out) {
 
 /* read line-by-line a redirected FASTA format file from stdin
  * extract DNA sequence THREE */
-static size_t dna_seq3(struct str *s)
+static size_t dna_seq3(struct buf *b)
 {
-  str_init(s);
-  while (NULL != fgets(s->str, BUFSZ, stdin))
-    if ('>' == *s->str && !strncmp(">THREE", s->str, 6))
+  buf_init(b);
+  while (NULL != fgets(b->str, BUFSZ, stdin))
+    if ('>' == *b->str && !strncmp(">THREE", b->str, 6))
       break;
-  char *curr = s->str;
+  char *curr = b->str;
   while (NULL != fgets(curr, BUFSZ, stdin)) {
     if ('>' == *curr)
       break;
     size_t len = strlen(curr);
     if ('\n' == curr[len-1])
       len--;
-    str_grow(s, len);
-    curr = s->str + s->len;
+    buf_grow(b, len);
+    curr = b->str + b->len;
   }
-  return s->len;
+  return b->len;
 }
 
 int main(void)
 {
   static char buf[2][1024];
-  struct str seq;
+  struct buf seq;
   if (dna_seq3(&seq))
   #pragma omp sections
   {
