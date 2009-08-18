@@ -1,20 +1,20 @@
 /* The Computer Language Benchmarks Game
    http://shootout.alioth.debian.org/
 
-   contributed by Michael Barker
-   based on a Java contribution by Luzius Meisser
-
-   convert to C by dualamd
+   contributed by Ryan Flynn
 */
 
-#include <stdlib.h>
-#include <stdio.h>
 #include <stdbool.h>
-#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/select.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 enum Color {
-  blue, red, yellow, Color_CNT
+  blue, red, yellow, COLOR_CNT
 };
 
 static const char* ColorName[COLOR_CNT] = {
@@ -28,216 +28,181 @@ static const enum Color Compliment[COLOR_CNT][COLOR_CNT] = {
   /* yellow */ {  red,    blue,   yellow }
 };
 
-static void formatNumber(unsigned n, char *outbuf)
+static char * formatNumber(unsigned n, char *outbuf)
 {
   static const char *Digits[] = {
     "zero ", "one ", "two ",   "three ", "four ",
     "five ", "six ", "seven ", "eight ", "nine "
   };
+  char tmp[64], *t = tmp;
+  sprintf(tmp, "%u", n);
   *outbuf = '\0';
-  do
-    strcat(outbuf, Digits[n % 10]);
-  while ((n /= 10));
+  while (*t)
+    strcat(outbuf, Digits[*t++ - '0']);
   outbuf[strlen(outbuf)-1] = '\0';
+  return outbuf;
 }
 
 static void printColors(void)
 {
   for (enum Color x = blue; x <= yellow; x++)
     for (enum Color y = blue; y <= yellow; y++)
-      printf(" %s + %s -> %s\n",
+      printf("%s + %s -> %s\n",
         ColorName[x], ColorName[y], ColorName[Compliment[x][y]]);
+  fputc('\n', stdout);
 }
 
 struct Creature
 {
-  int        id;
-  /*
-   * this is what the parent/creatures read/write back and forth
-   * the rest
-   */
   struct Meet {
-    enum Color colour;
-    unsigned   cnt, sameCnt;
-    bool       two_met, sameid;
+    int        id;
+    enum Color color;
+    bool       two_met,
+               same_id;
+    unsigned   cnt,
+               sameCnt;
   } meet;
-  int        from[2],
-             to[2];
-             /*
-              * from[0]: creature read
-              * from[1]: master write
-              * to[0]: master read
-              * to[1]: creature write
-              */
-  struct Meet rd,
-              wr;
+  int          from[2], /* from[0]: creature read
+                         * from[1]: master write */
+               to[2];   /*   to[0]: master read
+                         *   to[1]: creature write */
 };
 
 /* format meeting times of each creature to string */
-static char * Creature_getResult(struct Creature* cr, char* str)
+static inline char * Creature_getResult(const struct Creature *cr, char *str)
 {
-  formatNumber(cr->sameCount, str + sprintf(str, "%u", cr->cnt));
+  formatNumber(cr->meet.sameCnt,
+    str + sprintf(str, "%u ", cr->meet.cnt));
   return str;
 }
 
-static void Meet_merge(const struct Meet *src, struct Meet *dst)
+static inline const char * Creature_init(struct Creature *cr,
+                                         const enum Color color)
+{
+  static int CreatureID = 0;
+  cr->meet.cnt = cr->meet.sameCnt = 0;
+  cr->meet.id = ++CreatureID;
+  cr->meet.color = color;
+  cr->meet.two_met = false;
+  pipe(cr->from);
+  pipe(cr->to);
+  return ColorName[color];
+}
+
+/* merge transient meeting results with creature state */
+static inline void Meet_merge(const struct Meet *src, struct Meet *dst)
 {
   dst->color = src->color;
   dst->cnt++;
-  dst->sameCnt += src->sameCnt;
   dst->two_met |= src->two_met;
   dst->same_id |= src->same_id;
+  if (src->same_id)
+    dst->sameCnt++;
 }
 
-static void Creature_Init(struct Creature *cr, struct MeetingPlace* place, enum Colour color)
-{
-  static int CreatureID = 0;
-  cr->place = place;
-  cr->cnt = cr->sameCnt = 0;
-  cr->id = ++CreatureID;
-  cr->color = color;
-  cr->two_met = false;
-  pipe(cr->from);
-  pipe(cr->to);
-}
-
-/*
- * run in the context of a forked "creature" process.
- * "meet" with other creatures, update our own state
- * based on the results.
- */
-static void Meet(struct Creature *c)
+static inline void runCreature(struct Creature *c)
 {
   struct Meet m;
   do {
-    write(c->to[1], "\0", 1);
-    read(c->from[0], &m, sizeof m);
-    Creature_merge(&m, &c->meet);
-  } while (tmp.cnt);
-  write(c->to[1], &c->meet, sizeof c->meet);
+    write(c->to[1], &c->meet, sizeof m); /* req meeting      */
+    read(c->from[0], &m, sizeof m);      /* meeting result   */
+    Meet_merge(&m, &c->meet);            /* update state     */
+  } while (m.two_met);
+  write(c->to[1], &c->meet, sizeof m);   /* send final state */
+  exit(0);
 }
 
-
-BOOL Meet( struct Creature* cr)
+static inline void meet(struct Creature *c0, struct Creature *c1)
 {
-   BOOL retval = TRUE;
-   struct MeetingPlace* mp = cr->place;
-   pthread_mutex_lock( &(mp->mutex) );
-   if ( mp->meetingsLeft > 0 )
-   {
-      if ( mp->firstCreature == 0 )
-      {
-         cr->two_met = FALSE;
-         mp->firstCreature = cr;
-      }
-      else
-      {
-         struct Creature* first;
-         enum Colour newColour;
-         first = mp->firstCreature;
-         newColour = doCompliment( cr->colour, first->colour );
-         cr->sameid = cr->id == first->id;
-         cr->colour = newColour;
-         cr->two_met = TRUE;
-         first->sameid = cr->sameid;
-         first->colour = newColour;
-         first->two_met = TRUE;
-         mp->firstCreature = 0;
-         mp->meetingsLeft--;
-      }
-   }
-   else
-      retval = FALSE;
-   pthread_mutex_unlock( &(mp->mutex) );
-   return retval;
+  struct Meet *m0 = &c0->meet,
+              *m1 = &c1->meet;
+  m0->cnt = m1->cnt = 1;
+  m0->color = m1->color = Compliment[m0->color][m1->color];
+  m0->two_met = m1->two_met = true;
+  m0->same_id = m1->same_id = m0->id == m1->id;
+  write(c0->from[1], &c0->meet, sizeof c0->meet);
+  write(c1->from[1], &c1->meet, sizeof c1->meet);
 }
 
-/*
- * context: run by single master thread
- */
-static void runGame(unsigned meetings, const unsigned n, struct Creature *c)
+static void doMeetings(int meetings, const int n, struct Creature *c)
 {
-  const int maxfd = c[n-1]->to[0];
+  const int maxfd = c[n-1].to[0];
+  int i, metcnt = 0;
   while (meetings) {
-#if 0
-    int select(int nfds, fd_set *readfds, fd_set *writefds,
-               fd_set *exceptfds, struct timeval *timeout);
-    void FD_CLR(int fd, fd_set *set);
-    int  FD_ISSET(int fd, fd_set *set);
-    void FD_SET(int fd, fd_set *set);
-    void FD_ZERO(fd_set *set);
-#endif
+    struct Creature *met[2];
     fd_set rd;
     FD_ZERO(&rd);
-    for (unsigned i = 0; i < n; i++)
-      FD_SET(c->to[0], &rd);
-              /*
-               * from[0]: creature read
-               * from[1]: master write
-               * to[0]: master read
-               * to[1]: creature write
-               */
-    int sel = select(maxfd, &rd, NULL, NULL, NULL);
-    printf("sel=%d\n", sel);
-    if (sel <= 0)
+    /* monitor creatures' meeting requests */
+    for (i = 0; i < n; i++)
+      if (!metcnt || met[0] != c+i)
+        FD_SET(c[i].to[0], &rd);
+    if (select(maxfd+1, &rd, NULL, NULL, NULL) <= 0)
       continue;
-    for (unsigned i = 0; i < cnt; i++) {
-      if (FD_ISSET(c[i]->to[0], &rd)) {
-        if (read(c[i]->to[0], 
+    /* meet() any two willing creatures */
+    for (i = 0; i < n; i++) {
+      if (!FD_ISSET(c[i].to[0], &rd))
+        continue;
+      if (read(c[i].to[0], &c[i].meet, sizeof c[i].meet) > 0) {
+        met[metcnt++] = c+i;
+        if (metcnt == 2) {
+          meet(met[0], met[1]);
+          metcnt = 0;
+          if (--meetings == 0)
+            break;
+        }
       }
     }
-    
+  }
+  /* game's over, collect final state and reap creatures */
+  for (i = 0; i < n; i++) {
+    c[i].meet.two_met = false;
+    write(c[i].from[1], &c[i].meet, sizeof c[i].meet);
+  }
+  for (i = 0; i < n; i++) {
+    read(c[i].to[0], &c[i].meet, sizeof c[i].meet);
+    wait(&metcnt);
   }
 }
 
-void runGame(int n_meeting, int ncolor, const enum Colour* colours)
+/* print per creature and total meet count */
+static inline void printResults(const unsigned n, const struct Creature *c)
 {
-   int i;
-   int total = 0;
-   char str[256];
-   struct MeetingPlace place;
-   struct Creature *creatures = (struct Creature*) calloc( ncolor, sizeof(struct Creature) );
-   MeetingPlace_Init( &place, n_meeting );
-   /* print initial color of each creature */
-   for (i = 0; i < ncolor; i++)
-   {
-      printf( "%s ", ColourName[ colours[i] ] );
-      Creature_Init( &(creatures[i]), &place, colours[i] );
-   }
-   printf("\n");
-   /* wait for them to meet */
-   for (i = 0; i < ncolor; i++)
-      pthread_join( creatures[i].ht, 0 );
-   /* print meeting times of each creature */
-   for (i = 0; i < ncolor; i++)
-   {
-      printf( "%s\n", Creature_getResult(&(creatures[i]), str) );
-      total += creatures[i].count;
-   }
-   /* print total meeting times, should equal n_meeting */
-   printf( "%s\n\n", formatNumber(total, str) );
-   /* cleaup & quit */
-   pthread_mutex_destroy( &place.mutex );
-   free(creatures);
+  char str[256];
+  unsigned total = 0;
+  for (unsigned i = 0; i < n; total += c[i].meet.cnt, i++)
+    printf("%s\n", Creature_getResult(c+i, str));
+  printf(" %s\n\n", formatNumber(total, str));
 }
 
-
-
-int main(int argc, char** argv)
+static void initGame(int meetings, const unsigned n, const enum Color *color)
 {
-   int n = (argc == 2) ? atoi(argv[1]) : 600;
+  unsigned i;
+  struct Creature *c = calloc(n, sizeof *c);
+  /* initial creature color */
+  for (i = 0; i < n; i++)
+    printf("%s ", Creature_init(c+i, color[i]));
+  fputc('\n', stdout);
+  /* launch creatures */
+  for (i = 0; i < n; i++)
+    if (0 == fork())
+      runCreature(c+i);
+  doMeetings(meetings, n, c);
+  printResults(n, c);
+  free(c);
+}
 
-   printColoursTable();
-   printf("\n");
-
-   const enum Colour r1[] = {   blue, red, yellow   };
-   const enum Colour r2[] = {   blue, red, yellow,
-                                red, yellow, blue,
-                                red, yellow, red, blue   };
-
-   runGame( n, sizeof(r1) / sizeof(r1[0]), r1 );
-   runGame( n, sizeof(r2) / sizeof(r2[0]), r2 );
-
-   return 0;
+int main(int argc, char* argv[])
+{
+  const enum Color r[] = {
+   blue, red,    yellow,
+   red,  yellow, blue,
+   red,  yellow, red,
+   blue
+  };
+  int n = (argc == 2) ? atoi(argv[1]) : 600;
+  printColors();
+  initGame(n, 3u, r);
+  initGame(n, sizeof r / sizeof r[0], r);
+  return 0;
 }
 
