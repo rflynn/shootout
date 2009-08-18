@@ -55,7 +55,7 @@ static void printColors(void)
 struct Creature
 {
   struct Meet {
-    int        id;
+    unsigned   id;
     enum Color color;
     bool       two_met,
                same_id;
