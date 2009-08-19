@@ -1,3 +1,11 @@
+/*
+ * line-based i/o is the limiting factor here;
+ * the only way to make it faster is to have
+ * a line-reader thread and a worker thread.
+ * i wonder if we can do multi-threaded i/o
+ * to read multiple lines concurrently?
+ * awful.
+ */
 
 #include <assert.h>
 #include <stdio.h>
@@ -42,7 +50,7 @@ static inline void buf_grow(struct buf *b, size_t len)
  */
 static inline void complement(char *str, size_t len)
 {
-  static const char Rev[256] = {
+  static const char Rev[128] = {
     ['A'] = 'T', ['a'] = 'T',
     ['B'] = 'V', ['b'] = 'V', 
     ['C'] = 'G', ['c'] = 'G',
@@ -57,8 +65,7 @@ static inline void complement(char *str, size_t len)
     ['T'] = 'A', ['t'] = 'A',
     ['V'] = 'B', ['v'] = 'B', 
     ['W'] = 'W', ['w'] = 'W', 
-    ['Y'] = 'R', ['y'] = 'R',
-    ['\n'] = '\n', ['\r'] = '\r'
+    ['Y'] = 'R', ['y'] = 'R'
   };
   while (len--)
     *str = Rev[(unsigned char)*str], str++;
@@ -88,10 +95,10 @@ static inline void dumplines(struct buf *b)
 {
   size_t left   = b->len,
          outlen = left + ((left + 59) / 60);
-  char  out[outlen],
+  char  *out    = malloc(outlen),
         *wr     = out,
         *rd     = b->str;
-  /* format 60-char lines to out */
+  /* format 60-char lines */
   while (left >= 60) {
     memcpy(wr, rd, 60);
     left -= 60, rd += 60, wr += 60;
@@ -101,7 +108,7 @@ static inline void dumplines(struct buf *b)
     memcpy(wr, rd, left), wr[left] = '\n';
   /* print */
   fwrite_unlocked(out, 1, outlen, stdout);
-  //free(out);
+  free(out);
 }
 
 static inline void dump(struct buf *b, bool id)
@@ -111,8 +118,8 @@ static inline void dump(struct buf *b, bool id)
     dumplines(b);
   }
   if (id)
-    fwrite(b->str + b->len, 1,
-           strlen(b->str + b->len), stdout);
+    fwrite_unlocked(b->str + b->len, 1,
+                    strlen(b->str + b->len), stdout);
 }
 
 /*
@@ -147,8 +154,9 @@ int main(void)
   struct buf b;
   buf_init(&b);
   char *curr = b.str;
-  while (fgets(curr, BUFSZ, stdin))
+  while (fgets_unlocked(curr, BUFSZ, stdin))
     curr = addline(curr, &b);
   dump(&b, false);
   return 0; 
 }
+
