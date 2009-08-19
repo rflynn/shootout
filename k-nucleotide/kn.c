@@ -39,7 +39,7 @@ static void buf_grow(struct buf *b, size_t len)
     b->alloc = newlen * 2;
     b->str = realloc(b->str, b->alloc);
     if (!b->str)
-      perror("malloc"), exit(1);
+      perror("realloc"), exit(1);
   }
   while (len--) /* uppercase */
     b->str[b->len] = (char)toupper((int)b->str[b->len]), b->len++;
