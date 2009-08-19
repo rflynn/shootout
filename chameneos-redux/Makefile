@@ -3,10 +3,10 @@
 CFLAGS = -W -Wall -std=c99 -pedantic -m32 -Os -DNDEBUG
 LDFLAGS = -m32 -lpthread
 
-test: c-r
-	time ./c-r
+test: cr
+	time ./cr
 
-c-r: c-r.o
+cr: cr.o
 
 compete: competition
 	time ./competition
@@ -14,5 +14,5 @@ compete: competition
 competition: competition.o
 
 clean:
-	$(RM) c-r *.o
+	$(RM) cr *.o
 
