@@ -8,12 +8,12 @@ correctness: rc
 	diff -u out test/revcomp-tiny-output.txt
 
 speed: competition rc
-	time ./competition < test/revcomp-big-input.txt > /dev/null
-	time ./competition < test/revcomp-big-input.txt > /dev/null
-	time ./competition < test/revcomp-big-input.txt > /dev/null
-	time ./rc < test/revcomp-big-input.txt > /dev/null
-	time ./rc < test/revcomp-big-input.txt > /dev/null
-	time ./rc < test/revcomp-big-input.txt > /dev/null
+	time ./big-test.sh | ./competition > /dev/null
+	time ./big-test.sh | ./competition > /dev/null
+	time ./big-test.sh | ./competition > /dev/null
+	time ./big-test.sh | ./rc > /dev/null
+	time ./big-test.sh | ./rc > /dev/null
+	time ./big-test.sh | ./rc > /dev/null
 
 rc: rc.o
 
