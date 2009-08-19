@@ -5,6 +5,7 @@
  * contributed by Ryan Flynn
  */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -68,7 +69,6 @@ static inline void reverse(char *str, size_t len)
 {
   long i = 0,
        half = len / 2 + (len & 1);
-  #pragma omp parallel for
   for (i = 0; i <= half - 8; i += 8) {
     /* 8 bytes at the same time */
     int64_t tmp = *(int64_t *)(str+i);
@@ -87,11 +87,10 @@ static inline void dumplines(struct buf *b)
 # define LINE 60
   size_t outlen = b->len + ((b->len + LINE - 1) / LINE),
          left   = b->len,
+         done   = left % LINE,
          wr     = 0,
-         rd     = 0,
-         done   = left % LINE;
+         rd     = 0;
   char  *out    = malloc(outlen);
-  //#pragma omp parallel for
   for (rd = wr = 0; left != done;
        rd += LINE, wr += LINE+1, left -= LINE)
   {

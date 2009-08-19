@@ -20,5 +20,5 @@ rc: rc.o
 competition: competition.o
 
 clean:
-	$(RM) rc *.o
+	$(RM) rc competition *.o
 
