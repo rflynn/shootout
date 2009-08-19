@@ -1,41 +1,30 @@
 /*
- * line-based i/o is the limiting factor here;
- * the only way to make it faster is to have
- * a line-reader thread and a worker thread.
- * i wonder if we can do multi-threaded i/o
- * to read multiple lines concurrently?
- * awful.
+ * The Computer Language Benchmarks Game
+ * http://shootout.alioth.debian.org
+ *
+ * contributed by Ryan Flynn
  */
 
-#include <assert.h>
 #include <stdio.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
-#include <unistd.h>
 
-#define BUFSZ   (1024 * 8UL)
-#define BSWAP64 __builtin_bswap64
+#define BUFSZ   8192
 
 struct buf {
+  size_t len,
+         alloc;
   char  *str;
-  size_t len, alloc;
 };
-
-static inline void buf_init(struct buf *b)
-{
-  b->len = 0;
-  b->alloc = BUFSZ;
-  b->str = malloc(b->alloc);
-}
 
 /**
  * grow buffer (if necessary) to contain >= BUFSZ available space
  */
 static inline void buf_grow(struct buf *b, size_t len)
 {
-  size_t newlen = b->len + len + BUFSZ;
+  b->len += len;
+  size_t newlen = b->len + BUFSZ;
   if (newlen > b->alloc) {
     b->alloc = newlen * 2;
     b->str = realloc(b->str, b->alloc);
@@ -50,7 +39,7 @@ static inline void buf_grow(struct buf *b, size_t len)
  */
 static inline void complement(char *str, size_t len)
 {
-  static const char Rev[128] = {
+  static const char Rev[256] = {
     ['A'] = 'T', ['a'] = 'T',
     ['B'] = 'V', ['b'] = 'V', 
     ['C'] = 'G', ['c'] = 'G',
@@ -67,8 +56,9 @@ static inline void complement(char *str, size_t len)
     ['W'] = 'W', ['w'] = 'W', 
     ['Y'] = 'R', ['y'] = 'R'
   };
-  while (len--)
-    *str = Rev[(unsigned char)*str], str++;
+  #pragma omp parallel for
+  for (unsigned i = 0; i < len; i++)
+    str[i] = Rev[(unsigned char)str[i]];
 }
 
 /**
@@ -78,11 +68,12 @@ static inline void reverse(char *str, size_t len)
 {
   long i = 0,
        half = len / 2 + (len & 1);
-  for ( ; i <= half - 8; i += 8) {
-    /* 8 octets at a time */
+  #pragma omp parallel for
+  for (i = 0; i <= half - 8; i += 8) {
+    /* 8 bytes at the same time */
     int64_t tmp = *(int64_t *)(str+i);
-    *(int64_t *)(str+i) = BSWAP64(*(int64_t *)(str-i+len-8));
-    *(int64_t *)(str-i+len-8) = BSWAP64(tmp);
+    *(int64_t *)(str+i) = __builtin_bswap64(*(int64_t *)(str-i+len-8));
+    *(int64_t *)(str-i+len-8) = __builtin_bswap64(tmp);
   }
   while (i < half) {
     char tmp = str[len-i-1];
@@ -93,52 +84,48 @@ static inline void reverse(char *str, size_t len)
 
 static inline void dumplines(struct buf *b)
 {
-  size_t left   = b->len,
-         outlen = left + ((left + 59) / 60);
-  char  *out    = malloc(outlen),
-        *wr     = out,
-        *rd     = b->str;
-  /* format 60-char lines */
-  while (left >= 60) {
-    memcpy(wr, rd, 60);
-    left -= 60, rd += 60, wr += 60;
-    *wr++ = '\n';
+# define LINE 60
+  size_t outlen = b->len + ((b->len + LINE - 1) / LINE),
+         left   = b->len,
+         wr     = 0,
+         rd     = 0,
+         done   = left % LINE;
+  char  *out    = malloc(outlen);
+  //#pragma omp parallel for
+  for (rd = wr = 0; left != done;
+       rd += LINE, wr += LINE+1, left -= LINE)
+  {
+    memcpy(out+wr, b->str+rd, LINE);
+    out[wr+LINE] = '\n';
   }
-  if (left)
-    memcpy(wr, rd, left), wr[left] = '\n';
-  /* print */
+  if (left) {
+    memcpy(out+wr, b->str+rd, left);
+    out[wr+left] = '\n';
+  }
   fwrite_unlocked(out, 1, outlen, stdout);
   free(out);
+  b->len = 0;
 }
 
-static inline void dump(struct buf *b, bool id)
+static inline void dump(struct buf *b)
 {
-  if (b->len) {
-    reverse(b->str, b->len);
-    dumplines(b);
-  }
-  if (id)
-    fwrite_unlocked(b->str + b->len, 1,
-                    strlen(b->str + b->len), stdout);
+  if (!b->len)
+    return;
+  reverse(b->str, b->len);
+  dumplines(b);
 }
 
 /*
  * act on a line of input
  */
-static inline char * addline(char *curr, struct buf *b)
+static inline char * addline(char *curr, size_t len, struct buf *b)
 {
-  if ('>' == *curr) {
-    /* header line, dump contents of buffer */
-    dump(b, true);
-    b->len = 0;
+  if ('>' != *curr) {
+    complement(curr, len - 1);
+    buf_grow(b, len - 1);
   } else {
-    /* sequence line, append and adjust buffer */
-    size_t len = strlen(curr);
-    if (len && curr[len-1] == '\n')
-      --len;
-    complement(curr, len);
-    b->len += len;
-    buf_grow(b, len);
+    dump(b);
+    fwrite_unlocked(curr, 1, len, stdout);
   }
   return b->str + b->len;
 }
@@ -151,12 +138,11 @@ static inline char * addline(char *curr, struct buf *b)
  */
 int main(void)
 {
-  struct buf b;
-  buf_init(&b);
+  struct buf b = { 0, BUFSZ, malloc(BUFSZ) };
   char *curr = b.str;
   while (fgets_unlocked(curr, BUFSZ, stdin))
-    curr = addline(curr, &b);
-  dump(&b, false);
+    curr = addline(curr, __builtin_strlen(curr), &b);
+  dump(&b);
   return 0; 
 }
 
