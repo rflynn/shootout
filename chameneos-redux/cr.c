@@ -1,7 +1,10 @@
 /* The Computer Language Benchmarks Game
    http://shootout.alioth.debian.org/
-
+   
    contributed by Ryan Flynn
+   
+   process-based concurrency via fork()
+   IPC via pipe()/read()/write()
 */
 
 #include <stdbool.h>
@@ -55,10 +58,10 @@ static void printColors(void)
 struct Creature
 {
   struct Meet {
-    unsigned   id;
+    unsigned   id:12,
+               two_met:1,
+               same_id:1;
     enum Color color;
-    bool       two_met,
-               same_id;
     unsigned   cnt,
                sameCnt;
   } meet;
@@ -104,7 +107,7 @@ static inline void runCreature(struct Creature *c)
 {
   struct Meet m;
   do {
-    write(c->to[1], &c->meet, sizeof m); /* req meeting      */
+    write(c->to[1], &c->meet, sizeof m); /* request meeting  */
     read(c->from[0], &m, sizeof m);      /* meeting result   */
     Meet_merge(&m, &c->meet);            /* update state     */
   } while (m.two_met);
@@ -122,6 +125,19 @@ static inline void meet(struct Creature *c0, struct Creature *c1)
   m0->same_id = m1->same_id = m0->id == m1->id;
   write(c0->from[1], &c0->meet, sizeof c0->meet);
   write(c1->from[1], &c1->meet, sizeof c1->meet);
+}
+
+static inline void doneMeetings(const int n, struct Creature *c)
+{
+  /* game's over, collect final state and reap creatures */
+  for (int i = 0; i < n; i++) {
+    c[i].meet.two_met = false;
+    write(c[i].from[1], &c[i].meet, sizeof c[i].meet);
+  }
+  for (int _, i = 0; i < n; i++) {
+    read(c[i].to[0], &c[i].meet, sizeof c[i].meet);
+    wait(&_);
+  }
 }
 
 static void doMeetings(int meetings, const int n, struct Creature *c)
@@ -153,15 +169,7 @@ static void doMeetings(int meetings, const int n, struct Creature *c)
       }
     }
   }
-  /* game's over, collect final state and reap creatures */
-  for (i = 0; i < n; i++) {
-    c[i].meet.two_met = false;
-    write(c[i].from[1], &c[i].meet, sizeof c[i].meet);
-  }
-  for (i = 0; i < n; i++) {
-    read(c[i].to[0], &c[i].meet, sizeof c[i].meet);
-    wait(&metcnt);
-  }
+  doneMeetings(n, c);
 }
 
 /* print per creature and total meet count */
