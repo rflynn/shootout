@@ -3,9 +3,11 @@
 CFLAGS = -W -Wall -std=c99 -pedantic -m32 -O3
 LDFLAGS = -m32
 
-correctness: rc
+check: rc
 	./rc < test/revcomp-tiny-input.txt > out
 	diff -u out test/revcomp-tiny-output.txt
+	./rc < test/revcomp-input.txt > out
+	diff -u out test/revcomp-output.txt
 
 speed: competition rc
 	time ./big-test.sh | ./competition > /dev/null
