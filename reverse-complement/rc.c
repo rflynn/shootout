@@ -13,7 +13,7 @@
 #include <string.h>
 
 #define LINESZ    60
-#define OUTBUFSZ  8 * 1024
+#define OUTBUFSZ  1024 * 1024
 
 /*
  *  _ _ _ _ _ _ _ _ _ _
@@ -36,7 +36,7 @@ static inline void revbuf_grow(struct revbuf *b)
 {
   const char *old = b->head;
   const size_t wrlen = buf_end(b) - b->wr;
-  b->alloc *= 2;
+  b->alloc += OUTBUFSZ;
   b->head = realloc(b->head, b->alloc);
   assert(b->head && "realloc");
   b->wr = memmove(buf_end(b) - wrlen,
