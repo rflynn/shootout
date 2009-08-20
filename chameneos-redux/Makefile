@@ -1,6 +1,6 @@
 # ex: set ts=8 noet:
 
-CFLAGS = -W -Wall -std=c99 -pedantic -m32 -Os -DNDEBUG
+CFLAGS = -W -Wall -std=c99 -pedantic -m32 -Os
 LDFLAGS = -m32 -lpthread
 
 test: cr
