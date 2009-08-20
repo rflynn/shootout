@@ -1,7 +1,7 @@
 # ex: set ts=8 noet:
 
-CFLAGS = -W -Wall -std=c99 -pedantic -fopenmp -m32 -O3
-LDFLAGS = -m32 -lgomp
+CFLAGS = -W -Wall -std=c99 -pedantic -m32 -O3
+LDFLAGS = -m32
 
 correctness: rc
 	./rc < test/revcomp-tiny-input.txt > out

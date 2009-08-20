@@ -57,7 +57,6 @@ static inline void complement(char *str, size_t len)
     ['W'] = 'W', ['w'] = 'W', 
     ['Y'] = 'R', ['y'] = 'R'
   };
-  #pragma omp parallel for
   for (unsigned i = 0; i < len; i++)
     str[i] = Rev[(unsigned char)str[i]];
 }
@@ -108,8 +107,6 @@ static inline void dumplines(struct buf *b)
 
 static inline void dump(struct buf *b)
 {
-  if (!b->len)
-    return;
   reverse(b->str, b->len);
   dumplines(b);
 }
@@ -144,4 +141,3 @@ int main(void)
   dump(&b);
   return 0; 
 }
-
